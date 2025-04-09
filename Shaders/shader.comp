@@ -1,0 +1,108 @@
+﻿#version 430
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout (rgba32f, binding = 0) uniform image2D image;
+
+struct double_double {
+    double hi;
+    double lo;
+};
+
+double_double toDD(double a) {
+    return double_double(a, 0.0);
+}
+
+double_double twoSum(double a, double b) {
+    double s = a + b;
+    double bb = s - a;
+    double err = (a - (s - bb)) + (b - bb);
+    return double_double(s, err);
+}
+
+double_double add(double_double a, double_double b){
+    double_double s = twoSum(a.hi, b.hi);
+    double lo = a.lo + b.lo + s.lo;
+    return twoSum(s.hi, lo);
+}
+
+double_double sub(double_double a, double_double b) {
+    return add(a, double_double(-b.hi, -b.lo));
+}
+
+double_double mult(double_double a, double_double b){
+    double hi = a.hi * b.hi;
+    double err = a.hi * b.lo + b.hi * a.lo;
+    return double_double(hi, err);
+}
+
+double_double multConst(double_double a, double b){
+    return mult(a, toDD(b));
+}
+
+uniform dvec2 offset;
+uniform double zoom;
+uniform vec2 resolution;
+uniform uint colorMode;
+uniform float deltaTime;
+
+
+int MAX_ITER = 100;
+
+vec3 colorScheme(int iterations) {
+    if (iterations == MAX_ITER) return vec3(0.0, 0.0, 0.0);
+    float t = float(iterations) / float(MAX_ITER);
+    switch (colorMode){
+        case 1:
+            return vec3(0.5 + 0.5 * cos(3.0 + t * 5.0), 0.5 + 0.5 * cos(2.0 + t * 3.0), 0.5 + 0.5 * cos(1.0 + t * 2.0));
+        case 2:
+            return vec3(0.7 + 0.3 * cos(2.0 + t * 6.283), 0.3 + 0.3 * cos(1.0 + t * 4.0), 0.1 + 0.2 * cos(0.5 + t * 2.0));
+        case 3:
+            return vec3(0.5 + 0.4 * cos(t * 6.0), 0.5 + 0.4 * cos(t * 6.0 + 2.0), 0.5 + 0.4 * cos(t * 6.0 + 4.0));
+        case 4:
+            return vec3(0.2 + 0.4 * cos(5.0 * t + 1.0), 0.1 + 0.3 * cos(4.0 * t + 2.0), 0.4 + 0.5 * cos(3.0 * t + 3.0));
+        case 5:
+            return vec3(0.2 + 0.3 * cos(4.0 + t * 6.0), 0.4 + 0.4 * cos(1.0 + t * 4.0), 0.7 + 0.3 * cos(2.0 + t * 3.0));
+        default:
+            return vec3(0.5 + 0.5 * cos(3.0 + t * 5.0), 0.5 + 0.5 * cos(2.0 + t * 3.0), 0.5 + 0.5 * cos(1.0 + t * 2.0));
+    }
+}
+
+void main(){
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(resolution.x) || pixel.y >= int(resolution.y)) return;
+
+    dvec2 uv =  ((dvec2(pixel) / (resolution / 2.0)) - 1.0);
+    dvec2 c_d = uv * zoom  + offset;
+
+    double_double c_x = toDD(double(c_d.x));
+    double_double c_y = toDD(double(c_d.y));
+
+    double_double z_x = c_x;
+    double_double z_y = c_y;
+
+    int iter = 0;
+    double magnitude = sqrt(z_x.hi * z_x.hi + z_y.hi * z_y.hi);
+    while (magnitude < 2.0f && iter < MAX_ITER){
+
+        double_double z_x2 = mult(z_x, z_x);
+        double_double z_y2 = mult(z_y, z_y);
+        double_double real = sub(z_x2, z_y2);
+        real = add(real, c_x);
+
+        double_double z_xy = mult(z_x, z_y);
+        double_double imaginary = multConst(z_xy, 2.0f);
+        imaginary = add(imaginary, c_y);
+
+        z_x = real;
+        z_y = imaginary;
+
+        magnitude = sqrt(z_x.hi * z_x.hi + z_y.hi * z_y.hi);
+        //        z = dvec2(z.x * z.x - z.y * z.y, 2.0f * z.x * z.y) + c;
+        iter++;
+    }
+
+    imageStore(image, pixel, vec4(colorScheme(iter), 1.0f));
+
+
+}
